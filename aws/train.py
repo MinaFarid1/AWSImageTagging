@@ -8,6 +8,8 @@ from PIL import Image
 import torch.nn as nn
 import torchvision.models as models
 import zipfile
+import numpy as np
+from sklearn.metrics import recall_score  # Import for recall calculation
 
 
 # Custom Dataset class
@@ -42,18 +44,42 @@ class MultiLabelImageDataset(Dataset):
         return image, labels
 
 
+# Define the Focal Loss function
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1, gamma=2, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        BCE_loss = nn.BCEWithLogitsLoss(reduction='none')(inputs, targets)
+        pt = torch.sigmoid(inputs) * targets + (1 - torch.sigmoid(inputs)) * (1 - targets)
+        F_loss = self.alpha * (1 - pt) ** self.gamma * BCE_loss
+        
+        if self.reduction == 'mean':
+            return F_loss.mean()
+        elif self.reduction == 'sum':
+            return F_loss.sum()
+        else:
+            return F_loss
+
+
 # Define the model
 class MultiLabelClassifier(nn.Module):
     def __init__(self, num_classes):
         super(MultiLabelClassifier, self).__init__()
         self.resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
         for param in self.resnet.parameters():
-            param.requires_grad = False
+            param.requires_grad = False  # Freeze the feature extraction layers
         self.resnet.fc = nn.Sequential(
-            nn.Linear(self.resnet.fc.in_features, 512),
+            nn.Linear(self.resnet.fc.in_features, 1024),  # First fully connected layer
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(512, num_classes)
+            nn.Linear(1024, 512),  # Second fully connected layer
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(512, num_classes)  # Output layer
         )
 
     def forward(self, x):
@@ -117,26 +143,35 @@ def train(args):
 
     # Model, Loss, and Optimizer
     model = MultiLabelClassifier(num_classes).to(device)
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = FocalLoss()  # Use Focal Loss instead of BCEWithLogitsLoss
     optimizer = torch.optim.Adam(model.resnet.fc.parameters(), lr=args.lr)
 
     def evaluate(model, data_loader, criterion):
         model.eval()
         total_loss = 0.0
-        correct = 0
-        total = 0
+        all_labels = []
+        all_predictions = []
+
         with torch.no_grad():
             for images, labels in data_loader:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 total_loss += loss.item()
+
                 predicted = (torch.sigmoid(outputs) > 0.5).float()
-                total += labels.size(0) * num_classes
-                correct += (predicted == labels).sum().item()
+                all_labels.append(labels.cpu().numpy())
+                all_predictions.append(predicted.cpu().numpy())
+
         avg_loss = total_loss / len(data_loader)
-        accuracy = correct / total
-        return avg_loss, accuracy
+        all_labels = np.vstack(all_labels)
+        all_predictions = np.vstack(all_predictions)
+
+        # Calculate recall
+        recall = recall_score(all_labels, all_predictions, average='macro')
+        return avg_loss, recall
+
+    best_val_recall = 0.0  # Initialize the best validation recall
 
     # Training Loop
     for epoch in range(args.epochs):
@@ -160,11 +195,20 @@ def train(args):
 
         avg_train_loss = train_loss / len(train_loader)
         train_accuracy = train_correct / train_total
-        val_loss, val_accuracy = evaluate(model, val_loader, criterion)
+        val_loss, val_recall = evaluate(model, val_loader, criterion)
 
         print(f'Epoch [{epoch+1}/{args.epochs}]')
         print(f'  Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}')
-        print(f'  Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.4f}')
+        print(f'  Val Loss: {val_loss:.4f}, Val Recall: {val_recall:.4f}')  # Changed to show recall
+
+        # Save the best model based on validation recall
+        if val_recall > best_val_recall:
+            best_val_recall = val_recall
+            CHECKPOINT_PATH = os.path.join(args.model_dir, 'best_model.pth')  # Define checkpoint path
+            torch.save(model.state_dict(), CHECKPOINT_PATH)
+            print(f"  Saving the best model with validation recall: {val_recall:.4f}")
+
+    # Save final model
     torch.save(model.state_dict(), os.path.join(args.model_dir, 'model.pth'))
 
 

@@ -44,16 +44,21 @@ class MultiLabelClassifier(nn.Module):
         self.resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
         for param in self.resnet.parameters():
             param.requires_grad = False
+        for param in self.resnet.layer4.parameters():
+            param.requires_grad = True
         self.resnet.fc = nn.Sequential(
-            nn.Linear(self.resnet.fc.in_features, 512),
+            nn.Linear(self.resnet.fc.in_features, 1024),
+            nn.ReLU(),
+            nn.BatchNorm1d(1024),
+            nn.Dropout(0.2),
+            nn.Linear(1024, 512),
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(512, num_classes)
         )
 
     def forward(self, x):
-        x = self.resnet(x)
-        return x 
+        return self.resnet(x)
 
 # Load model
 def model_fn(model_dir):

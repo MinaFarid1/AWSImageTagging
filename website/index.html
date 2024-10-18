@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image Tagging</title>
+    <style>
+      body {
+        font-family: "Arial", sans-serif;
+        background-color: #f4f6f9;
+        color: #333;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 28px;
+        color: #2c3e50;
+        margin-bottom: 20px;
+        text-align: center;
+      }
+
+      .container {
+        background-color: #fff;
+        border-radius: 10px;
+        padding: 40px;
+        box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
+        max-width: 400px;
+        width: 100%;
+        text-align: center;
+      }
+
+      input[type="file"] {
+        display: none;
+      }
+
+      label {
+        display: inline-block;
+        padding: 10px 20px;
+        background-color: #3498db;
+        color: #fff;
+        border-radius: 5px;
+        cursor: pointer;
+        margin-bottom: 20px;
+      }
+
+      button {
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        padding: 12px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+        width: 100%;
+        transition: background-color 0.3s ease;
+      }
+
+      button:hover {
+        background-color: #45a049;
+      }
+
+      .spinner {
+        display: none;
+        border: 6px solid #f3f3f3;
+        border-top: 6px solid #3498db;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1.5s linear infinite;
+        margin: 20px auto;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .loading-message {
+        display: none;
+        font-size: 16px;
+        color: #555;
+        margin-top: 10px;
+      }
+
+      .progress-bar {
+        display: none;
+        width: 0;
+        height: 8px;
+        background-color: #4caf50;
+        margin-top: 10px;
+        border-radius: 5px;
+        transition: width 0.4s ease;
+      }
+
+      .image-preview {
+        margin-bottom: 20px;
+      }
+
+      .image-preview img {
+        max-width: 100%;
+        border-radius: 10px;
+        display: none;
+      }
+
+      .result {
+        margin-top: 20px;
+        text-align: left;
+      }
+
+      .result h2 {
+        font-size: 20px;
+        color: #2c3e50;
+        margin-bottom: 15px;
+      }
+
+      .classification-result {
+        margin-top: 10px;
+      }
+
+      .classification-result div {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .label {
+        width: 30%;
+        font-weight: bold;
+      }
+
+      .progress {
+        width: 60%;
+        height: 20px;
+        background-color: #e0e0e0;
+        border-radius: 10px;
+        margin-right: 10px;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background-color: #3498db;
+        border-radius: 10px;
+      }
+
+      .percentage {
+        width: 10%;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Upload Image for Tagging</h1>
+
+      <label for="imageInput">Choose an Image</label>
+      <input type="file" id="imageInput" accept="image/*" />
+
+      <!-- Image Preview -->
+      <div class="image-preview" id="imagePreview">
+        <img id="previewImg" alt="Image Preview" />
+      </div>
+
+      <button id="uploadButton">Upload and Tag</button>
+
+      <!-- Spinner, Progress Bar, and Loading Message -->
+      <div class="spinner" id="spinner"></div>
+      <div class="loading-message" id="loadingMessage">
+        Uploading and tagging image, please wait...
+      </div>
+
+      <!-- Display Result -->
+      <div class="result" id="result"></div>
+    </div>
+
+    <script>
+      const imageInput = document.getElementById("imageInput");
+      const previewImg = document.getElementById("previewImg");
+
+      imageInput.addEventListener("change", function () {
+        const file = this.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = function (e) {
+            previewImg.style.display = "block";
+            previewImg.src = e.target.result;
+          };
+          reader.readAsDataURL(file);
+        } else {
+          previewImg.style.display = "none";
+          previewImg.src = "";
+        }
+      });
+
+      document
+        .getElementById("uploadButton")
+        .addEventListener("click", async function () {
+          const spinner = document.getElementById("spinner");
+          const loadingMessage = document.getElementById("loadingMessage");
+          const resultDiv = document.getElementById("result");
+
+          if (!imageInput.files[0]) {
+            alert("Please select an image.");
+            return;
+          }
+
+          // Reset result div
+          resultDiv.innerHTML = "";
+
+          // Display loading spinner and message
+          spinner.style.display = "block";
+          loadingMessage.style.display = "block";
+
+          const apiGatewayUrl = "api_url";
+          const apiKey = "api_key";
+
+          try {
+            const imageFile = imageInput.files[0];
+
+            // Send the request with the image file
+            const response = await fetch(apiGatewayUrl, {
+              method: "POST",
+              headers: {
+                "x-api-key": apiKey,
+                "Content-Type": "application/x-image",
+              },
+              body: imageFile,
+            });
+
+            if (response.ok) {
+              const jsonResponse = await response.json();
+              const probabilities = jsonResponse.probabilities;
+
+              let classificationHtml = "<h2>Tagging Result</h2>";
+              classificationHtml += '<div class="classification-result">';
+
+              for (const [label, probability] of Object.entries(
+                probabilities
+              )) {
+                const percentage = Math.round(probability * 100);
+                classificationHtml += `
+                  <div>
+                    <span class="label">${label}</span>
+                    <div class="progress">
+                      <div class="progress-fill" style="width: ${percentage}%"></div>
+                    </div>
+                    <span class="percentage">${percentage}%</span>
+                  </div>`;
+              }
+
+              classificationHtml += "</div>";
+              resultDiv.innerHTML = classificationHtml;
+            } else {
+              resultDiv.innerHTML = `<p style="color: red;">Failed to tag the image. Server responded with status: ${response.status}</p>`;
+            }
+
+            spinner.style.display = "none";
+            loadingMessage.style.display = "none";
+          } catch (error) {
+            console.error("Error:", error);
+            resultDiv.innerHTML = `<p style="color: red;">Failed to tag the image. ${error.message}</p>`;
+            spinner.style.display = "none";
+            loadingMessage.style.display = "none";
+          }
+        });
+    </script>
+  </body>
+</html>
